@@ -1,0 +1,80 @@
+name: Publish powa-archivist version to GHCR (dispatch only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pg_version:
+        description: 'PostgreSQL version for powa-archivist'
+        required: true
+        default: '18'
+        type: choice
+        options:
+          - '9.6'
+          - '10'
+          - '11'
+          - '12'
+          - '13'
+          - '14'
+          - '15'
+          - '16'
+          - '17'
+          - '18'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: powa-archivist
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    name: Build and push powa-archivist-pg${{ inputs.pg_version }} to GHCR
+    if: ${{ !contains(github.triggering_actor, '[bot]') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Calculate PG version without dots
+        id: pgver
+        run: |
+          PG_VER_NO_DOT=$(echo "${{ inputs.pg_version }}" | sed 's/\.//')
+          echo "pg-ver-no-dot=${PG_VER_NO_DOT}" >> $GITHUB_OUTPUT
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}-pg${{ steps.pgver.outputs.pg-ver-no-dot }}
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./powa-archivist/${{ inputs.pg_version }}
+          file: ./powa-archivist/${{ inputs.pg_version }}/Containerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Image published successfully
+        run: |
+          echo "✓ Image published successfully to GHCR"
+          echo "✓ Tags: ${{ steps.meta.outputs.tags }}"
